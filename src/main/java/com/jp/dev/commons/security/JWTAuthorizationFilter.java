@@ -1,8 +1,8 @@
 package com.jp.dev.commons.security;
 
-import static com.jp.dev.commons.security.SecurityConstants.HEADER_STRING;
 import static com.jp.dev.commons.security.SecurityConstants.SECRET;
 import static com.jp.dev.commons.security.SecurityConstants.TOKEN_PREFIX;
+import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
@@ -10,12 +10,14 @@ import com.auth0.jwt.exceptions.AlgorithmMismatchException;
 import com.auth0.jwt.exceptions.InvalidClaimException;
 import com.auth0.jwt.exceptions.SignatureVerificationException;
 import com.auth0.jwt.exceptions.TokenExpiredException;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -25,6 +27,8 @@ import org.springframework.security.web.authentication.www.BasicAuthenticationFi
 
 public class JWTAuthorizationFilter extends BasicAuthenticationFilter {
 
+    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+
     public JWTAuthorizationFilter(AuthenticationManager authManager) {
         super(authManager);
     }
@@ -33,35 +37,35 @@ public class JWTAuthorizationFilter extends BasicAuthenticationFilter {
     protected void doFilterInternal(HttpServletRequest req,
                                     HttpServletResponse res,
                                     FilterChain chain) throws IOException, ServletException {
-        String header = req.getHeader(HEADER_STRING);
+        String jwtToken = req.getHeader(AUTHORIZATION);
 
-        if (header == null || !header.startsWith(TOKEN_PREFIX)) {
+        if (jwtToken == null || !jwtToken.startsWith(TOKEN_PREFIX)) {
             res.setStatus(HttpStatus.UNAUTHORIZED.value());
             chain.doFilter(req, res);
             return;
         }
 
-        UsernamePasswordAuthenticationToken authentication = getAuthentication(req);
+        UsernamePasswordAuthenticationToken authentication = validateTokenJwt(req);
 
         SecurityContextHolder.getContext().setAuthentication(authentication);
         chain.doFilter(req, res);
     }
 
     // Reads the JWT from the Authorization header, and then uses JWT to validate the token
-    private UsernamePasswordAuthenticationToken getAuthentication(HttpServletRequest request) {
-        String token = request.getHeader(HEADER_STRING);
+    private UsernamePasswordAuthenticationToken validateTokenJwt(HttpServletRequest request) {
+        String jwtToken = request.getHeader(AUTHORIZATION);
 
-        if (token != null) {
-            // parse the token.
+        if (jwtToken != null) {
+            // parse the jwtToken.
             try {
                 String user = JWT.require(Algorithm.HMAC512(SECRET.getBytes()))
                     .build()
-                    .verify(token.replace(TOKEN_PREFIX, ""))
+                    .verify(jwtToken.replace(TOKEN_PREFIX, ""))
                     .getSubject();
 
                 String role = JWT.require(Algorithm.HMAC512(SECRET.getBytes()))
                     .build()
-                    .verify(token.replace(TOKEN_PREFIX, ""))
+                    .verify(jwtToken.replace(TOKEN_PREFIX, ""))
                     .getClaim("role").asString();
 
                 if (user != null) {
@@ -70,19 +74,17 @@ public class JWTAuthorizationFilter extends BasicAuthenticationFilter {
                         List.of(new SimpleGrantedAuthority(role)));
                 }
             }catch (SignatureVerificationException ex){
-                System.out.println("Invalid JWT Signature");
+                logger.error("Invalid JWT Signature");
             }catch (TokenExpiredException ex){
-                System.out.println("Expired JWT token");
+                logger.error("Expired JWT jwtToken");
                 request.setAttribute("expired", ex.getMessage());
             }catch (AlgorithmMismatchException ex){
-                System.out.println("Unsupported JWT exception");
+                logger.error("Unsupported JWT exception");
             }catch (InvalidClaimException ex){
-                System.out.println("Jwt claims string is empty");
+                logger.error("Jwt claims string is empty");
             }
-
             return null;
         }
-
         return null;
     }
 }
